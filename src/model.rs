@@ -247,12 +247,13 @@ impl Mesh {
         // Convert Vec<Vertex> to Vec<f32> for storage in MeshData
         // Pre-allocate exact size to avoid reallocations
         let vertex_count = vertices.len();
-        let mut vertex_data = Vec::with_capacity(vertex_count * 11); // 3 pos + 3 norm + 2 uv + 3 color
+        let mut vertex_data = Vec::with_capacity(vertex_count * 16); // 16 floats per vertex
 
         for v in vertices {
             vertex_data.extend_from_slice(&v.position);
             vertex_data.extend_from_slice(&v.normal);
             vertex_data.extend_from_slice(&v.uv);
+            vertex_data.extend_from_slice(&v.tangent);
             vertex_data.extend_from_slice(&v.color);
         }
 
@@ -690,6 +691,7 @@ impl ModelLoader {
             iter.collect()
         } else {
             // Generate flat normals if none provided
+            // Initialize with zero for accumulation
             let mut normals = vec![[0.0; 3]; positions.len()];
 
             // If we have indices, use them to generate smooth normals
@@ -706,21 +708,32 @@ impl ModelLoader {
                     let v1 = Vec3::from_array(positions[i1]);
                     let v2 = Vec3::from_array(positions[i2]);
 
-                    let normal = (v1 - v0).cross(v2 - v0).normalize();
+                    let edge1 = v1 - v0;
+                    let edge2 = v2 - v0;
+                    let normal = edge1.cross(edge2);
 
-                    // Add this normal to all three vertices
-                    for &i in chunk {
-                        let idx = i as usize;
-                        normals[idx][0] += normal.x;
-                        normals[idx][1] += normal.y;
-                        normals[idx][2] += normal.z;
+                    // Only add if not degenerate
+                    if normal.length_squared() > 1e-6 {
+                        let normal = normal.normalize();
+                        // Add this normal to all three vertices
+                        for &i in chunk {
+                            let idx = i as usize;
+                            normals[idx][0] += normal.x;
+                            normals[idx][1] += normal.y;
+                            normals[idx][2] += normal.z;
+                        }
                     }
                 }
 
                 // Normalize all normals
                 for normal in &mut normals {
-                    let n = Vec3::from_array(*normal).normalize();
-                    *normal = n.to_array();
+                    let n = Vec3::from_array(*normal);
+                    if n.length_squared() > 1e-6 {
+                        *normal = n.normalize().to_array();
+                    } else {
+                        // Fallback for isolated vertices or degenerate geometry
+                        *normal = [0.0, 0.0, 1.0]; // Default Up
+                    }
                 }
             } else {
                 // No indices, generate flat normals for triangle list
@@ -729,15 +742,38 @@ impl ModelLoader {
                     let v1 = Vec3::from_array(chunk[1]);
                     let v2 = Vec3::from_array(chunk[2]);
 
-                    let normal = (v1 - v0).cross(v2 - v0).normalize();
+                    let edge1 = v1 - v0;
+                    let edge2 = v2 - v0;
+                    let normal = edge1.cross(edge2);
+
+                    let normal_array = if normal.length_squared() > 1e-6 {
+                        normal.normalize().to_array()
+                    } else {
+                        [0.0, 0.0, 1.0]
+                    };
 
                     for _ in 0..3 {
-                        normals.push(normal.to_array());
+                        normals.push(normal_array);
                     }
                 }
             }
 
             normals
+        };
+
+        // Read tangents (optional, default if not present)
+        let tangents: Vec<[f32; 4]> = if let Some(iter) = reader.read_tangents() {
+            iter.collect()
+        } else {
+            // Default tangent (x-axis)
+            vec![[1.0, 0.0, 0.0, 1.0]; positions.len()]
+        };
+
+        // Read colors (optional, default to white)
+        let colors: Vec<[f32; 4]> = if let Some(iter) = reader.read_colors(0) {
+            iter.into_rgba_f32().collect()
+        } else {
+            vec![[1.0, 1.0, 1.0, 1.0]; positions.len()]
         };
 
         // Read texture coordinates (required for PBR, default to zeros if not present)
@@ -754,7 +790,8 @@ impl ModelLoader {
                 position: positions[i],
                 normal: normals[i],
                 uv: tex_coords.get(i).copied().unwrap_or([0.0, 0.0]),
-                color: [1.0, 1.0, 1.0],
+                tangent: tangents.get(i).copied().unwrap_or([1.0, 0.0, 0.0, 1.0]),
+                color: colors.get(i).copied().unwrap_or([1.0, 1.0, 1.0, 1.0]),
             });
         }
 
@@ -1089,15 +1126,27 @@ impl ModelLoader {
                                 let v1 = glam::Vec3::from(positions[i1]);
                                 let v2 = glam::Vec3::from(positions[i2]);
 
-                                let normal = (v1 - v0).cross(v2 - v0).normalize();
+                                let edge1 = v1 - v0;
+                                let edge2 = v2 - v0;
+                                let normal = edge1.cross(edge2);
 
-                                // Add to each vertex's normal
-                                normals[i0] =
-                                    (glam::Vec3::from(normals[i0]) + normal).normalize().into();
-                                normals[i1] =
-                                    (glam::Vec3::from(normals[i1]) + normal).normalize().into();
-                                normals[i2] =
-                                    (glam::Vec3::from(normals[i2]) + normal).normalize().into();
+                                if normal.length_squared() > 1e-6 {
+                                    let normal = normal.normalize();
+                                    // Add to each vertex's normal (accumulate)
+                                    normals[i0] = (glam::Vec3::from(normals[i0]) + normal).into();
+                                    normals[i1] = (glam::Vec3::from(normals[i1]) + normal).into();
+                                    normals[i2] = (glam::Vec3::from(normals[i2]) + normal).into();
+                                }
+                            }
+                        }
+
+                        // Normalize accumulated normals
+                        for normal in &mut normals {
+                            let n = glam::Vec3::from(*normal);
+                            if n.length_squared() > 1e-6 {
+                                *normal = n.normalize().into();
+                            } else {
+                                *normal = [0.0, 0.0, 1.0]; // Default Up
                             }
                         }
                     }
@@ -1106,11 +1155,28 @@ impl ModelLoader {
                 };
 
                 // Extract texture coordinates (default to zero if missing)
+                // Extract texture coordinates (default to zero if missing)
                 let tex_coords = if let Some(tex_coord_iter) = reader.read_tex_coords(0) {
                     tex_coord_iter.into_f32().collect::<Vec<[f32; 2]>>()
                 } else {
                     log::debug!("    - No texture coordinates found, using defaults");
                     vec![[0.0, 0.0]; positions.len()]
+                };
+
+                // Extract tangents (default if missing)
+                let tangents = if let Some(iter) = reader.read_tangents() {
+                    iter.collect::<Vec<[f32; 4]>>()
+                } else {
+                    log::debug!("    - No tangents found, using defaults");
+                    vec![[1.0, 0.0, 0.0, 1.0]; positions.len()]
+                };
+
+                // Extract colors (default if missing)
+                let colors = if let Some(iter) = reader.read_colors(0) {
+                    iter.into_rgba_f32().collect::<Vec<[f32; 4]>>()
+                } else {
+                    log::debug!("    - No colors found, using defaults");
+                    vec![[1.0, 1.0, 1.0, 1.0]; positions.len()]
                 };
 
                 // Extract indices (generate a simple triangle list if missing)
@@ -1141,16 +1207,22 @@ impl ModelLoader {
                 }
 
                 // Create vertices from extracted data
+                // Create vertices from extracted data
                 let vertices = positions
                     .into_iter()
                     .zip(normals.into_iter())
                     .zip(tex_coords.into_iter())
-                    .map(|((position, normal), tex_coord)| Vertex {
-                        position,
-                        normal,
-                        uv: tex_coord,
-                        color: [1.0, 1.0, 1.0],
-                    })
+                    .zip(tangents.into_iter())
+                    .zip(colors.into_iter())
+                    .map(
+                        |((((position, normal), tex_coord), tangent), color)| Vertex {
+                            position,
+                            normal,
+                            uv: tex_coord,
+                            tangent,
+                            color,
+                        },
+                    )
                     .collect::<Vec<Vertex>>();
 
                 log::debug!("    - Created {} vertices", vertices.len());
@@ -1249,25 +1321,29 @@ mod tests {
                 position: [-0.5, -0.5, 0.0],
                 normal: [0.0, 0.0, 1.0],
                 uv: [0.0, 0.0],
-                color: [1.0, 1.0, 1.0],
+                tangent: [1.0, 0.0, 0.0, 1.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             },
             Vertex {
                 position: [0.5, -0.5, 0.0],
                 normal: [0.0, 0.0, 1.0],
                 uv: [1.0, 0.0],
-                color: [1.0, 1.0, 1.0],
+                tangent: [1.0, 0.0, 0.0, 1.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             },
             Vertex {
                 position: [0.5, 0.5, 0.0],
                 normal: [0.0, 0.0, 1.0],
                 uv: [1.0, 1.0],
-                color: [1.0, 1.0, 1.0],
+                tangent: [1.0, 0.0, 0.0, 1.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             },
             Vertex {
                 position: [-0.5, 0.5, 0.0],
                 normal: [0.0, 0.0, 1.0],
                 uv: [0.0, 1.0],
-                color: [1.0, 1.0, 1.0],
+                tangent: [1.0, 0.0, 0.0, 1.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             },
         ];
 

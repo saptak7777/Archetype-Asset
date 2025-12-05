@@ -103,7 +103,7 @@ impl DefaultSimplifier {
 impl MeshSimplifier for DefaultSimplifier {
     fn simplify(&self, mesh: &Mesh, target_vertex_count: usize) -> Mesh {
         let mesh_data = mesh.vertices();
-        let current_vertex_count = mesh_data.vertices.len() / 8; // 8 floats per vertex
+        let current_vertex_count = mesh_data.vertices.len() / 16; // 16 floats per vertex
 
         // If already at or below target, return clone
         if current_vertex_count <= target_vertex_count {
@@ -155,7 +155,7 @@ impl MeshSimplifier for MeshoptSimplifier {
         let indices = &mesh_data.indices;
 
         // Convert to meshopt format
-        let vertex_count = vertices.len() / 8;
+        let vertex_count = vertices.len() / 16;
         if target_vertex_count >= vertex_count {
             return mesh.clone();
         }
@@ -163,7 +163,7 @@ impl MeshSimplifier for MeshoptSimplifier {
         // Create position array for meshopt (3 floats per vertex)
         let mut positions: Vec<f32> = Vec::with_capacity(vertex_count * 3);
         for i in 0..vertex_count {
-            let base = i * 8;
+            let base = i * 16;
             positions.push(vertices[base]); // x
             positions.push(vertices[base + 1]); // y
             positions.push(vertices[base + 2]); // z
@@ -205,12 +205,23 @@ impl MeshSimplifier for MeshoptSimplifier {
             let new_idx = new_vertices.len() as u32;
             remap.insert(*old_idx, new_idx);
 
-            let base = (*old_idx as usize) * 8;
+            let base = (*old_idx as usize) * 16;
             new_vertices.push(Vertex {
                 position: [vertices[base], vertices[base + 1], vertices[base + 2]],
                 normal: [vertices[base + 3], vertices[base + 4], vertices[base + 5]],
                 uv: [vertices[base + 6], vertices[base + 7]],
-                color: [1.0, 1.0, 1.0], // Default color
+                tangent: [
+                    vertices[base + 8],
+                    vertices[base + 9],
+                    vertices[base + 10],
+                    vertices[base + 11],
+                ],
+                color: [
+                    vertices[base + 12],
+                    vertices[base + 13],
+                    vertices[base + 14],
+                    vertices[base + 15],
+                ],
             });
         }
 
@@ -255,7 +266,7 @@ pub fn generate_lod_levels(
     }
 
     let mesh_data = mesh.vertices();
-    let vertex_count = mesh_data.vertices.len() / 8;
+    let vertex_count = mesh_data.vertices.len() / 16;
     let mut result = Vec::with_capacity(levels);
 
     // First level is the original mesh
@@ -303,25 +314,29 @@ mod tests {
                 position: [-0.5, -0.5, 0.0],
                 normal: [0.0, 0.0, 1.0],
                 uv: [0.0, 0.0],
-                color: [1.0, 1.0, 1.0],
+                tangent: [1.0, 0.0, 0.0, 1.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             },
             Vertex {
                 position: [0.5, -0.5, 0.0],
                 normal: [0.0, 0.0, 1.0],
                 uv: [1.0, 0.0],
-                color: [1.0, 1.0, 1.0],
+                tangent: [1.0, 0.0, 0.0, 1.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             },
             Vertex {
                 position: [0.5, 0.5, 0.0],
                 normal: [0.0, 0.0, 1.0],
                 uv: [1.0, 1.0],
-                color: [1.0, 1.0, 1.0],
+                tangent: [1.0, 0.0, 0.0, 1.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             },
             Vertex {
                 position: [-0.5, 0.5, 0.0],
                 normal: [0.0, 0.0, 1.0],
                 uv: [0.0, 1.0],
-                color: [1.0, 1.0, 1.0],
+                tangent: [1.0, 0.0, 0.0, 1.0],
+                color: [1.0, 1.0, 1.0, 1.0],
             },
         ];
 

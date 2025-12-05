@@ -49,7 +49,7 @@ let cached_model = cache.get_or_load_model("model.glb")?;
 
 ```toml
 [dependencies]
-archetype_asset = { version = "0.1.1", features = ["gpu-vulkan", "runtime-tokio"] }
+archetype_asset = { version = "0.1.2", features = ["gpu-vulkan", "runtime-tokio"] }
 ```
 
 ## API Overview

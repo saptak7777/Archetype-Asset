@@ -2,7 +2,7 @@
 //!
 //! This module provides the vertex structure used throughout the asset system.
 
-/// A vertex with position, normal, UV, and color data
+/// A vertex with position, normal, UV, tangent, and color data
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Vertex {
@@ -12,17 +12,20 @@ pub struct Vertex {
     pub normal: [f32; 3],
     /// Texture coordinates
     pub uv: [f32; 2],
+    /// Tangent vector (xyz + w handedness)
+    pub tangent: [f32; 4],
     /// Vertex color (RGBA)
-    pub color: [f32; 3],
+    pub color: [f32; 4],
 }
 
 impl Default for Vertex {
     fn default() -> Self {
         Self {
             position: [0.0, 0.0, 0.0],
-            normal: [0.0, 1.0, 0.0],
+            normal: [0.0, 0.0, 1.0], // Default up (Z+)
             uv: [0.0, 0.0],
-            color: [1.0, 1.0, 1.0],
+            tangent: [1.0, 0.0, 0.0, 1.0], // Default tangent
+            color: [1.0, 1.0, 1.0, 1.0],
         }
     }
 }
@@ -34,12 +37,19 @@ impl Vertex {
             position,
             normal,
             uv,
-            color: [1.0, 1.0, 1.0],
+            tangent: [1.0, 0.0, 0.0, 1.0], // Default tangent
+            color: [1.0, 1.0, 1.0, 1.0],
         }
     }
 
+    /// Set the tangent vector
+    pub fn with_tangent(mut self, tangent: [f32; 4]) -> Self {
+        self.tangent = tangent;
+        self
+    }
+
     /// Create a vertex with color
-    pub fn with_color(mut self, color: [f32; 3]) -> Self {
+    pub fn with_color(mut self, color: [f32; 4]) -> Self {
         self.color = color;
         self
     }
@@ -51,11 +61,11 @@ impl Vertex {
 
     /// Number of floats per vertex
     pub const fn floats_per_vertex() -> usize {
-        11 // 3 + 3 + 2 + 3
+        16 // 3 + 3 + 2 + 4 + 4
     }
 
     /// Convert to flat array of floats
-    pub fn to_floats(&self) -> [f32; 11] {
+    pub fn to_floats(&self) -> [f32; 16] {
         [
             self.position[0],
             self.position[1],
@@ -65,9 +75,14 @@ impl Vertex {
             self.normal[2],
             self.uv[0],
             self.uv[1],
+            self.tangent[0],
+            self.tangent[1],
+            self.tangent[2],
+            self.tangent[3],
             self.color[0],
             self.color[1],
             self.color[2],
+            self.color[3],
         ]
     }
 }
@@ -80,11 +95,13 @@ mod tests {
     fn test_vertex_default() {
         let v = Vertex::default();
         assert_eq!(v.position, [0.0, 0.0, 0.0]);
-        assert_eq!(v.normal, [0.0, 1.0, 0.0]);
+        assert_eq!(v.normal, [0.0, 0.0, 1.0]);
+        assert_eq!(v.tangent, [1.0, 0.0, 0.0, 1.0]);
     }
 
     #[test]
     fn test_vertex_size() {
+        assert_eq!(Vertex::size(), 64);
         assert_eq!(Vertex::size(), std::mem::size_of::<Vertex>());
     }
 
@@ -93,7 +110,8 @@ mod tests {
         let v = Vertex::new([1.0, 2.0, 3.0], [0.0, 1.0, 0.0], [0.5, 0.5]);
         let floats = v.to_floats();
         assert_eq!(floats[0], 1.0);
-        assert_eq!(floats[1], 2.0);
-        assert_eq!(floats[2], 3.0);
+        assert_eq!(floats[3], 0.0); // normal x
+        assert_eq!(floats[8], 1.0); // tangent x
+        assert_eq!(floats.len(), 16);
     }
 }
