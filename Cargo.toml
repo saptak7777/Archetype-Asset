@@ -1,0 +1,99 @@
+[package]
+name = "archetype_asset"
+version = "0.1.0"
+edition = "2021"
+authors = ["Saptak Santra"]
+license = "Apache-2.0"
+repository = "https://github.com/saptak-santra/archetype_asset"
+description = "Fast, modular asset system with spatial preloading"
+keywords = ["asset", "game", "gpu", "async", "streaming"]
+categories = ["game-engines", "graphics"]
+readme = "README.md"
+
+[dependencies]
+# Core
+thiserror = "1.0"
+anyhow = "1.0"
+log = "0.4"
+parking_lot = "0.12"
+bytemuck = { version = "1.14", features = ["derive"] }
+fxhash = "0.2"
+
+# Async utilities
+futures = "0.3"
+async-trait = "0.1"
+
+# Math
+glam = "0.25"
+
+# Hashing
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+
+# UUID generation
+uuid = { version = "1.0", features = ["v4"] }
+
+# Image loading
+image = { version = "0.24", default-features = false, features = ["jpeg", "png", "webp"] }
+
+# GLTF loading
+gltf = "1.4"
+
+# Shared arena for memory pooling
+shared_arena = "0.8"
+
+# GPU - Vulkan (optional)
+ash = { version = "0.37", optional = true }
+vk-mem = { version = "0.3", optional = true }
+
+# Async runtime - Tokio (optional)
+tokio = { version = "1.0", features = ["rt-multi-thread", "fs", "time", "sync"], optional = true }
+
+# Mesh optimization (optional)
+meshopt = { version = "0.2", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "time"] }
+tempfile = "3.0"
+criterion = "0.5"
+proptest = "1.0"
+
+[features]
+default = ["gpu-mock", "runtime-mock"]
+full = ["gpu-vulkan", "runtime-tokio", "metrics", "spatial-preload", "lod"]
+
+# GPU backends
+gpu-vulkan = ["ash", "vk-mem"]
+gpu-mock = []
+
+# Async runtimes
+runtime-tokio = ["tokio"]
+runtime-mock = []
+
+# Optional features
+metrics = []
+spatial-preload = []
+lod = ["meshopt"]
+
+[[example]]
+name = "basic_loading"
+path = "examples/basic_loading.rs"
+
+[[example]]
+name = "async_streaming"
+path = "examples/async_streaming.rs"
+
+[[example]]
+name = "spatial_preload"
+path = "examples/spatial_preload.rs"
+
+[[bench]]
+name = "load_5mb_gltf"
+harness = false
+
+[[bench]]
+name = "cache_hit_perf"
+harness = false
+
+[[bench]]
+name = "memory_footprint"
+harness = false
