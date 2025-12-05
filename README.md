@@ -18,18 +18,18 @@
 ## Quick Start
 
 ```rust
-use archetype_asset::{AssetCache, MockGpu, ModelLoader};
+use archetype_asset::{AssetCache, MockGpu};
 use archetype_asset::loader::gltf::load_glb_file;
 
 // Create GPU and cache
 let gpu = MockGpu::new();
 let cache = AssetCache::new(gpu, 100 * 1024 * 1024); // 100MB cache
 
-// Load a GLB model
+// Load a GLB model directly
 let model = load_glb_file("model.glb")?;
 println!("Loaded {} meshes", model.meshes.len());
 
-// Or use the cache for automatic caching
+// Or use the cache for automatic caching (recommended)
 let cached_model = cache.get_or_load_model("model.glb")?;
 ```
 
@@ -49,7 +49,7 @@ let cached_model = cache.get_or_load_model("model.glb")?;
 
 ```toml
 [dependencies]
-archetype_asset = { version = "0.1", features = ["gpu-vulkan", "runtime-tokio"] }
+archetype_asset = { version = "0.1.1", features = ["gpu-vulkan", "runtime-tokio"] }
 ```
 
 ## API Overview
@@ -93,6 +93,23 @@ println!("Cache using {} bytes", cache.memory_usage());
 let hit_rate = cache.metrics().cache_hit_rate();
 ```
 
+### Model Loading
+
+```rust
+use archetype_asset::{ModelLoader, Vertex};
+
+// Load from bytes
+let loader = ModelLoader::new();
+let model = loader.load_glb(&glb_bytes)?;
+
+// Access mesh data
+for mesh in &model.meshes {
+    let vertices = mesh.vertices();
+    let vertex_count = vertices.vertices.len() / Vertex::floats_per_vertex();
+    println!("Mesh has {} vertices", vertex_count);
+}
+```
+
 ### Spatial Preloading (Unique!)
 
 ```rust
@@ -118,6 +135,17 @@ let lod_model = LodModel::new(lod_levels, thresholds);
 
 // Select LOD based on screen size
 let mesh_to_render = lod_model.get_lod(screen_size);
+```
+
+### Texture Loading
+
+```rust
+use archetype_asset::TextureLoader;
+
+// Synchronous loading
+let loader = TextureLoader::new();
+let texture = loader.load_file_sync("texture.png")?;
+println!("Loaded {}x{} texture", texture.width, texture.height);
 ```
 
 ## Performance

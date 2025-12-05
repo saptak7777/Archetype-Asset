@@ -22,6 +22,8 @@ use crate::model::{LoadedModel, Material, ModelLoader, Node};
 #[cfg(feature = "runtime-tokio")]
 use crate::spatial::preloader::AssetPreloader;
 use crate::texture::Texture;
+#[cfg(feature = "runtime-tokio")]
+use crate::texture::TextureLoader;
 use metrics::AssetMetricsHandle;
 
 // Re-export pool types

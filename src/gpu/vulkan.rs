@@ -1,19 +1,148 @@
 //! Vulkan GPU implementation
 //!
-//! Provides a Vulkan backend using `ash` and `gpu-allocator`.
+//! Provides a Vulkan backend using `ash` and `vk-mem`.
 
 use super::{BufferUsage, GpuDevice, GpuError, GpuResult, GpuTextureFormat, TextureDescriptor};
 use ash::vk;
 use parking_lot::Mutex;
+use std::fmt;
 use std::sync::Arc;
+use vk_mem::Alloc;
+
+/// Inner state for VulkanBuffer that holds the actual Vulkan resources
+struct VulkanBufferInner {
+    /// Vulkan buffer handle
+    buffer: vk::Buffer,
+    /// VMA allocation
+    allocation: vk_mem::Allocation,
+    /// Buffer size in bytes
+    size: usize,
+    /// Buffer usage
+    #[allow(dead_code)]
+    usage: BufferUsage,
+    /// Reference to allocator for cleanup
+    allocator: Arc<Mutex<vk_mem::Allocator>>,
+}
+
+impl Drop for VulkanBufferInner {
+    fn drop(&mut self) {
+        let allocator = self.allocator.lock();
+        unsafe {
+            allocator.destroy_buffer(self.buffer, &mut self.allocation);
+        }
+        log::trace!("VulkanBuffer destroyed (size={})", self.size);
+    }
+}
+
+/// Vulkan buffer with associated allocation
+#[derive(Clone)]
+pub struct VulkanBuffer {
+    inner: Arc<Mutex<VulkanBufferInner>>,
+    /// Vulkan buffer handle (cached for quick access)
+    pub buffer: vk::Buffer,
+    /// Buffer size in bytes (cached for quick access)
+    pub size: usize,
+    /// Buffer usage (cached for quick access)
+    pub usage: BufferUsage,
+}
+
+impl fmt::Debug for VulkanBuffer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VulkanBuffer")
+            .field("size", &self.size)
+            .field("usage", &self.usage)
+            .finish()
+    }
+}
+
+impl VulkanBuffer {
+    /// Get the raw Vulkan buffer handle
+    pub fn handle(&self) -> vk::Buffer {
+        self.buffer
+    }
+}
+
+/// Inner state for VulkanTexture that holds the actual Vulkan resources
+struct VulkanTextureInner {
+    /// Vulkan image handle
+    image: vk::Image,
+    /// Image view
+    view: vk::ImageView,
+    /// VMA allocation
+    allocation: vk_mem::Allocation,
+    /// Reference to allocator for cleanup
+    allocator: Arc<Mutex<vk_mem::Allocator>>,
+    /// Reference to device for cleanup
+    device: ash::Device,
+}
+
+impl Drop for VulkanTextureInner {
+    fn drop(&mut self) {
+        unsafe {
+            self.device.destroy_image_view(self.view, None);
+        }
+        let allocator = self.allocator.lock();
+        unsafe {
+            allocator.destroy_image(self.image, &mut self.allocation);
+        }
+        log::trace!("VulkanTexture destroyed");
+    }
+}
+
+/// Vulkan texture with associated image and view
+#[derive(Clone)]
+pub struct VulkanTexture {
+    #[allow(dead_code)]
+    inner: Arc<Mutex<VulkanTextureInner>>,
+    /// Vulkan image handle (cached for quick access)
+    pub image: vk::Image,
+    /// Image view (cached for quick access)
+    pub view: vk::ImageView,
+    /// Texture width (cached for quick access)
+    pub width: u32,
+    /// Texture height (cached for quick access)
+    pub height: u32,
+    /// Format (cached for quick access)
+    pub format: GpuTextureFormat,
+}
+
+impl fmt::Debug for VulkanTexture {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VulkanTexture")
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .field("format", &self.format)
+            .finish()
+    }
+}
+
+impl VulkanTexture {
+    /// Get the raw Vulkan image handle
+    pub fn image(&self) -> vk::Image {
+        self.image
+    }
+
+    /// Get the image view handle
+    pub fn view(&self) -> vk::ImageView {
+        self.view
+    }
+}
 
 /// Vulkan GPU device wrapper
 ///
 /// Wraps `ash::Device` and VMA allocator to implement the `GpuDevice` trait.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct VulkanDevice {
     device: ash::Device,
     allocator: Arc<Mutex<vk_mem::Allocator>>,
+}
+
+impl fmt::Debug for VulkanDevice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("VulkanDevice")
+            .field("backend", &"Vulkan")
+            .finish()
+    }
 }
 
 impl VulkanDevice {
@@ -68,68 +197,6 @@ impl VulkanDevice {
     }
 }
 
-/// Vulkan buffer with associated allocation
-#[derive(Clone, Debug)]
-pub struct VulkanBuffer {
-    /// Vulkan buffer handle
-    pub buffer: vk::Buffer,
-    /// VMA allocation
-    pub allocation: vk_mem::Allocation,
-    /// Buffer size in bytes
-    pub size: usize,
-    /// Buffer usage
-    pub usage: BufferUsage,
-    /// Reference to allocator for cleanup
-    allocator: Arc<Mutex<vk_mem::Allocator>>,
-}
-
-impl VulkanBuffer {
-    /// Get the raw Vulkan buffer handle
-    pub fn handle(&self) -> vk::Buffer {
-        self.buffer
-    }
-}
-
-impl Drop for VulkanBuffer {
-    fn drop(&mut self) {
-        // Note: In practice, you'd want to defer this cleanup
-        // to avoid destroying resources still in use by the GPU.
-        // For now, we just log that cleanup would happen here.
-        log::trace!("VulkanBuffer dropped (size={})", self.size);
-    }
-}
-
-/// Vulkan texture with associated image and view
-#[derive(Clone, Debug)]
-pub struct VulkanTexture {
-    /// Vulkan image handle
-    pub image: vk::Image,
-    /// Image view
-    pub view: vk::ImageView,
-    /// VMA allocation
-    pub allocation: vk_mem::Allocation,
-    /// Texture dimensions
-    pub width: u32,
-    pub height: u32,
-    /// Format
-    pub format: GpuTextureFormat,
-    /// Reference to allocator for cleanup
-    allocator: Arc<Mutex<vk_mem::Allocator>>,
-    /// Reference to device for cleanup
-    device: ash::Device,
-}
-
-impl Drop for VulkanTexture {
-    fn drop(&mut self) {
-        log::trace!(
-            "VulkanTexture dropped ({}x{}, format={:?})",
-            self.width,
-            self.height,
-            self.format
-        );
-    }
-}
-
 impl GpuDevice for VulkanDevice {
     type Buffer = VulkanBuffer;
     type Texture = VulkanTexture;
@@ -159,16 +226,25 @@ impl GpuDevice for VulkanDevice {
         };
 
         let allocator = self.allocator.lock();
-        let (buffer, allocation) = allocator
-            .create_buffer(&buffer_info, &allocation_info)
-            .map_err(|e| GpuError::AllocationFailed(format!("VMA error: {e:?}")))?;
+        let (buffer, allocation) = unsafe {
+            allocator
+                .create_buffer(&buffer_info, &allocation_info)
+                .map_err(|e| GpuError::AllocationFailed(format!("VMA error: {e:?}")))?
+        };
 
-        Ok(VulkanBuffer {
+        let inner = VulkanBufferInner {
             buffer,
             allocation,
             size,
             usage,
             allocator: Arc::clone(&self.allocator),
+        };
+
+        Ok(VulkanBuffer {
+            inner: Arc::new(Mutex::new(inner)),
+            buffer,
+            size,
+            usage,
         })
     }
 
@@ -187,18 +263,20 @@ impl GpuDevice for VulkanDevice {
             )));
         }
 
+        let mut inner = buffer.inner.lock();
         let allocator = self.allocator.lock();
 
         // Map memory, copy data, unmap
-        let ptr = allocator
-            .map_memory(&buffer.allocation)
-            .map_err(|e| GpuError::UploadFailed(format!("Failed to map memory: {e:?}")))?;
+        let ptr = unsafe {
+            allocator
+                .map_memory(&mut inner.allocation)
+                .map_err(|e| GpuError::UploadFailed(format!("Failed to map memory: {e:?}")))?
+        };
 
         unsafe {
             std::ptr::copy_nonoverlapping(data.as_ptr(), ptr.add(offset), data.len());
+            allocator.unmap_memory(&mut inner.allocation);
         }
-
-        allocator.unmap_memory(&buffer.allocation);
 
         Ok(())
     }
@@ -235,9 +313,11 @@ impl GpuDevice for VulkanDevice {
         };
 
         let allocator = self.allocator.lock();
-        let (image, allocation) = allocator
-            .create_image(&image_info, &allocation_info)
-            .map_err(|e| GpuError::TextureCreationFailed(format!("VMA error: {e:?}")))?;
+        let (image, allocation) = unsafe {
+            allocator
+                .create_image(&image_info, &allocation_info)
+                .map_err(|e| GpuError::TextureCreationFailed(format!("VMA error: {e:?}")))?
+        };
 
         // Create image view
         let view_info = vk::ImageViewCreateInfo::builder()
@@ -261,29 +341,30 @@ impl GpuDevice for VulkanDevice {
         // This is a simplified implementation
         let _ = data; // Data upload happens separately via staging buffer
 
-        Ok(VulkanTexture {
+        let inner = VulkanTextureInner {
             image,
             view,
             allocation,
+            allocator: Arc::clone(&self.allocator),
+            device: self.device.clone(),
+        };
+
+        Ok(VulkanTexture {
+            inner: Arc::new(Mutex::new(inner)),
+            image,
+            view,
             width: desc.width,
             height: desc.height,
             format: desc.format,
-            allocator: Arc::clone(&self.allocator),
-            device: self.device.clone(),
         })
     }
 
-    fn destroy_buffer(&self, buffer: Self::Buffer) {
-        let allocator = self.allocator.lock();
-        allocator.destroy_buffer(buffer.buffer, &buffer.allocation);
+    fn destroy_buffer(&self, _buffer: Self::Buffer) {
+        // Drop is handled by VulkanBufferInner
     }
 
-    fn destroy_texture(&self, texture: Self::Texture) {
-        unsafe {
-            self.device.destroy_image_view(texture.view, None);
-        }
-        let allocator = self.allocator.lock();
-        allocator.destroy_image(texture.image, &texture.allocation);
+    fn destroy_texture(&self, _texture: Self::Texture) {
+        // Drop is handled by VulkanTextureInner
     }
 
     fn backend_name(&self) -> &'static str {

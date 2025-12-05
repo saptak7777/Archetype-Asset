@@ -148,6 +148,7 @@ impl MeshSimplifier for MeshoptSimplifier {
     fn simplify(&self, mesh: &Mesh, target_vertex_count: usize) -> Mesh {
         use crate::model::PrimitiveType;
         use crate::renderer::Vertex;
+        use meshopt::{SimplifyOptions, VertexDataAdapter};
 
         let mesh_data = mesh.vertices();
         let vertices = &mesh_data.vertices;
@@ -159,7 +160,7 @@ impl MeshSimplifier for MeshoptSimplifier {
             return mesh.clone();
         }
 
-        // Create position array for meshopt
+        // Create position array for meshopt (3 floats per vertex)
         let mut positions: Vec<f32> = Vec::with_capacity(vertex_count * 3);
         for i in 0..vertex_count {
             let base = i * 8;
@@ -168,15 +169,25 @@ impl MeshSimplifier for MeshoptSimplifier {
             positions.push(vertices[base + 2]); // z
         }
 
+        // Create VertexDataAdapter for meshopt
+        let position_bytes: &[u8] = bytemuck::cast_slice(&positions);
+        let vertex_adapter = VertexDataAdapter::new(
+            position_bytes,
+            std::mem::size_of::<f32>() * 3, // stride: 3 floats per vertex
+            0,                              // offset
+        )
+        .expect("Failed to create VertexDataAdapter");
+
         // Simplify using meshopt
         let target_index_count = (indices.len() * target_vertex_count) / vertex_count;
 
         let simplified_indices = meshopt::simplify(
             indices,
-            &positions,
-            vertex_count,
+            &vertex_adapter,
             target_index_count.max(3),
             self.error_threshold,
+            SimplifyOptions::empty(),
+            None,
         );
 
         // Rebuild mesh with simplified indices
